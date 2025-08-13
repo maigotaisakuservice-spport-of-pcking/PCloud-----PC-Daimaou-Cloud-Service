@@ -341,3 +341,112 @@ async function saveSettings(){
 }
 async function factoryReset(){ const req=indexedDB.deleteDatabase(DB_NAME); req.onsuccess=()=>location.reload(); req.onerror=()=>alert('Reset failed'); }
 
+/* ---------------------------
+   CLI core + builtins
+---------------------------- */
+let history = [], hPtr = 0;
+const builtins = {}, userCmds = {};
+const ctxApi = { out:(t)=>out(t), log:(t)=>logLine(t), readFile:(p)=>idbGet('files',p), writeFile:(p,c)=>idbSet('files',p,c), delFile:(p)=>idbDel('files',p), listFiles:()=>idbAll('files'), settingsGet:(k)=>idbGet('settings',k), settingsSet:(k,v)=>idbSet('settings',k,v), runNode, npmInstall };
+
+function registerBuiltin(name, fn){ builtins[name]=fn; }
+function registerUserCmd(name, fn){ userCmds[name]=fn; }
+function parse(cmdline){ const args=[]; let cur='', inQ=false, q='"'; for(let i=0;i<cmdline.length;i++){ const ch=cmdline[i]; if(!inQ && /\s/.test(ch)){ if(cur){args.push(cur); cur='';} continue; } if(ch==='"'||ch=="'"){ if(!inQ){ inQ=true; q=ch; continue; } else if(q===ch){ inQ=false; continue; } } cur+=ch; } if(cur) args.push(cur); return args; }
+async function run(cmdline){ if(!cmdline.trim()) return; promptLine(cmdline); const args=parse(cmdline); const name=args.shift(); const ctx={ args, line:cmdline, out, log:logLine, api:ctxApi }; try{ if(builtins[name]) await builtins[name](ctx); else if(userCmds[name]) await userCmds[name](ctx); else out(`Unknown command: ${name}. Try 'help'.`,'warn'); }catch(e){ out(String(e),'err'); console.error(e); } }
+
+/* builtins */
+registerBuiltin('help', async ({out})=>{
+  out(`Commands:
+  help                Show help
+  clear               Clear terminal
+  ls                  List files
+  cat <path>          Show file
+  edit <path>         Open in editor (creates if missing)
+  save                Save current editor buffer
+  fetch <url> [method] [jsonBody]
+  node <file.js>      Run with Node (WebContainer)
+  npm <args...>       npm command in Node env
+  run                 Refresh preview
+  c:run               Compile & run C (requires plugin)
+  command add <name> <js-fn>  Add user command
+  command list        List user commands
+  settings            Open Settings
+`);
+});
+registerBuiltin('clear', async ()=>{ term.innerHTML=''; });
+registerBuiltin('ls', async ({out})=>{ const {keys} = await idbAll('files'); keys.forEach(k=>out(k)); });
+registerBuiltin('cat', async ({args,out})=>{ const p=args[0]; if(!p) return out('Usage: cat <path>','warn'); const v=await idbGet('files',p); out(v==null? '(not found)': v); });
+registerBuiltin('edit', async ({args,out})=>{ const p=args[0]; if(!p) return out('Usage: edit <path>','warn'); const v=await idbGet('files',p); if(v==null) await idbSet('files',p,''); await loadFilesToEditorTabs(); await openFile(p); out(`Opened ${p}`); });
+registerBuiltin('save', async ({out})=>{ await saveCurrent(); out('Saved.','ok'); });
+registerBuiltin('fetch', async ({args,out})=>{ const url=args[0]; if(!url) return out('Usage: fetch <url>','warn'); const method=(args[1]||'GET').toUpperCase(); let body=null; if(args[2]){ try{ body=JSON.parse(args[2]); }catch{ body=args[2]; } } try{ const res = await fetch(url,{method,headers:body?{'Content-Type':'application/json'}:undefined,body:body?(typeof body==='string'?body:JSON.stringify(body)):undefined}); const text = await res.text(); out(`Status: ${res.status}`); out(text); }catch(e){ out('Fetch error: '+e,'err'); } });
+
+async function runNode(file='/app.js'){ if(!webcontainer){ out('Node not ready.','warn'); return; } await mountToWebContainer(); out(`node ${file}`); await wcSpawn('node',[file],(d)=>out(d)); }
+registerBuiltin('node', async ({args})=>{ const f=args[0]||'/app.js'; const p=f.startsWith('/')?f:('/'+f); runNode(p); });
+
+async function npmInstall(args){ if(!webcontainer){ out('Node not ready.','warn'); return 1; } await mountToWebContainer(); out(`npm ${args.join(' ')}`); return await wcSpawn('npm', args, (d)=>out(d)); }
+registerBuiltin('npm', async ({args,out})=>{ if(args.length===0) return out('Usage: npm <args...>','warn'); await npmInstall(args); });
+
+registerBuiltin('run', async ({})=>{ const autosave = await idbGet('settings','autosave'); if(autosave) await saveCurrent(); refreshPreview(); out('Preview refreshed.','ok'); });
+
+registerBuiltin('c:run', async ({out})=>{
+  if(!cReady){ out('C plugin not loaded. Check Settings.','warn'); return; }
+  try{
+    const src = await idbGet('files','/main.c') || '';
+    out('Compiling C…');
+    const res = await window.compileC ? await window.compileC(src) : 'No compileC';
+    if(typeof res === 'string') out(res);
+    else { if(res.stdout) out(res.stdout); if(res.stderr) out(res.stderr,'err'); if('exitCode' in res) out('exit '+res.exitCode); }
+  }catch(e){ out('C compile error: '+e,'err'); }
+});
+
+registerBuiltin('command', async ({args,out})=>{
+  const sub=args[0];
+  if(sub==='add'){
+    const name=args[1]; const code=args.slice(2).join(' ');
+    if(!name||!code) return out("Usage: command add <name> <js-fn>","warn");
+    try{ const fn = eval(code); if(typeof fn!=='function') throw new Error('Not a function'); await idbSet('cmds',name,code); userCmds[name]=fn; out(`Added ${name}`,'ok'); }catch(e){ out('Invalid function: '+e,'err'); }
+  } else if(sub==='list'){ const all = await idbAll('cmds'); if(!all.keys||all.keys.length===0) return out('(no user commands)'); all.keys.forEach(k=>out('- '+k)); }
+  else out("Usage: command add/list",'warn');
+});
+registerBuiltin('settings', async ({})=> showModal(true) );
+
+/* ---------------------------
+   Input handling & completion
+---------------------------- */
+const completions = ['help','clear','ls','cat','edit','save','fetch','node','npm','run','c:run','command add','command list','settings'];
+function complete(text){ const cand = completions.concat(Object.keys(userCmds)).filter(c=>c.startsWith(text)); if(cand.length===1) return cand[0]+' '; if(cand.length>1) out(cand.join('  '),'hint'); return text; }
+input.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ const v=input.value; history.push(v); hPtr=history.length; run(v); input.value=''; } else if(e.key==='ArrowUp'){ if(hPtr>0){ hPtr--; input.value=history[hPtr]||''; input.setSelectionRange(input.value.length,input.value.length);} } else if(e.key==='ArrowDown'){ if(hPtr<history.length){ hPtr++; input.value=history[hPtr]||''; input.setSelectionRange(input.value.length,input.value.length);} } else if(e.key==='Tab'){ e.preventDefault(); input.value = complete(input.value); } });
+btnEnter.onclick = ()=>{ const v=input.value; history.push(v); hPtr=history.length; run(v); input.value=''; };
+
+/* ---------------------------
+   Buttons wiring
+---------------------------- */
+btnRun.onclick = ()=>run('run');
+btnPreview.onclick = ()=>refreshPreview();
+btnSave.onclick = ()=>saveCurrent().then(()=>out('Saved.','ok'));
+btnRefresh.onclick = ()=>refreshPreview();
+btnLogClear.onclick = ()=>{ logEl.innerHTML=''; };
+btnSettings.onclick = ()=>{ loadSettings().then(()=>showModal(true)); };
+document.getElementById('btn-save-settings').onclick = saveSettings;
+document.getElementById('btn-reset-all').onclick = ()=>{ if(confirm('Factory reset?')) factoryReset(); };
+
+/* ---------------------------
+   Bootstrap
+---------------------------- */
+(async function boot(){
+  await openDB();
+  await loadSettings();
+  setupMonaco();
+  out('WebCloud ready. Type "help" to begin.','ok');
+
+  // load user cmds
+  const all = await idbAll('cmds'); if(all.keys) for(let i=0;i<all.keys.length;i++){ try{ userCmds[all.keys[i]] = eval(all.vals[i]); }catch(e){} }
+
+  // Node
+  bootWebContainer();
+
+  // Try to auto-load C plugin
+  await loadCPluginAuto();
+})();
+</script>
+</body>
+</html>
