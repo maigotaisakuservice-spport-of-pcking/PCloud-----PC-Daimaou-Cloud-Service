@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>WebCloud IDE & CLI — Node + C (CDN auto)</title>
+<style>
+/* --- ダーク ITっぽいスタイル (省略せず実物) --- */
+:root{--bg:#0b0f14;--panel:#121927;--panel2:#0f1520;--txt:#e6edf3;--sub:#a8b3bf;--acc:#00d4ff;--ok:#6ee7b7;--warn:#fbbf24;--err:#f87171;--border:#1c2735;--muted:#202b3a}
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);font-family:ui-monospace,Menlo,Consolas,monospace}
+.layout{display:grid;grid-template-rows:48px 1fr;height:100%}
+header{display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:linear-gradient(180deg,var(--panel),var(--panel2));border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:10px}
+.badge{padding:2px 8px;border-radius:999px;font-size:12px;background:linear-gradient(90deg,#00d4ff,#8b5cf6);color:#031018;font-weight:700}
+.controls{display:flex;gap:8px;align-items:center}
+button{background:var(--muted);color:var(--txt);border:1px solid var(--border);padding:8px 10px;border-radius:12px;cursor:pointer;font-weight:600}
+button:hover{background:#223349}.pill{border-radius:999px}
+.main{display:grid;grid-template-columns:46% 54%;height:calc(100vh - 48px)}
+.col{border-right:1px solid var(--border);overflow:hidden}.col:last-child{border-right:none}
+.panel{height:100%;display:flex;flex-direction:column}
+.titlebar{height:36px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--border);background:var(--panel)}
+.title{font-weight:700;color:var(--sub)}
+.terminal{flex:1;background:#0a0f17;padding:10px;overflow:auto}.term-line{white-space:pre-wrap;margin:0}.prompt{color:#86efac}
+.inputbar{border-top:1px solid var(--border);display:flex;gap:8px;padding:8px;background:var(--panel)}
+.inputbar input{flex:1;background:#0e1624;border:1px solid var(--border);color:var(--txt);padding:10px;border-radius:10px}
+.split{display:grid;grid-template-rows:1fr 42%;height:100%}
+#editor{height:100%;width:100%;background:#0b1220}
+.tabs{display:flex;gap:8px;padding:8px;border-bottom:1px solid var(--border);background:var(--panel2)}
+.tab{padding:6px 10px;border-radius:10px;cursor:pointer;background:#0f1a2b;border:1px solid var(--border);color:var(--sub)}
+.tab.active{background:#13243b;color:var(--txt)}
+.subpanel{border-top:1px solid var(--border);background:#0b1019;display:grid;grid-template-columns:55% 45%}
+.subcol{display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden}.subcol:last-child{border-right:none}
+.toolbar{padding:6px 8px;display:flex;gap:8px;border-bottom:1px solid var(--border);background:var(--panel2)}
+.small{font-size:12px}.hint{color:var(--sub);font-size:12px}
+#preview{flex:1;border:0;background:#0a0f17}
+.log{flex:1;background:#0a0f17;padding:10px;overflow:auto}
+.right{margin-left:auto}
+.modal-backdrop{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.5)}
+.modal{width:min(820px,96vw);background:#0f1520;border:1px solid var(--border);border-radius:16px;overflow:hidden}
+.modal header{padding:10px 12px}.modal .body{padding:12px;display:grid;gap:10px}
+.field{display:grid;gap:6px}.field label{font-size:12px;color:var(--sub)}.field input,.field textarea{background:#0e1624;border:1px solid var(--border);color:var(--txt);padding:10px;border-radius:10px;width:100%}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.danger{background:#36161a;border-color:#5b1c23}
+</style>
+
+<!-- Monaco Editor loader -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+</head>
+<body>
+<div class="layout">
+  <header>
+    <div class="brand">
+      <span class="badge">WebCloud</span>
+      <div>IDE & CLI</div>
+      <div class="status" id="status-node">Node: <span class="warn">booting…</span></div>
+      <div class="status" id="status-c">C: <span class="warn">loading…</span></div>
+      <div class="status" id="status-db">Storage: <span class="ok">IndexedDB</span></div>
+    </div>
+    <div class="controls">
+      <button id="btn-settings" class="pill">⚙ Settings</button>
+      <button id="btn-save" class="pill">💾 Save</button>
+      <button id="btn-run" class="pill">▶ Run</button>
+      <button id="btn-preview" class="pill">🌐 Preview</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- Left: CLI -->
+    <div class="col panel">
+      <div class="titlebar"><span class="title">Console</span><span class="hint">type <span style="color:var(--acc)">help</span> · Tab for completion</span></div>
+      <div class="terminal" id="terminal"></div>
+      <div class="inputbar">
+        <input id="input" placeholder="> " />
+        <button id="btn-enter">Enter</button>
+      </div>
+    </div>
+
+    <!-- Right: Editor + Preview/Logs -->
+    <div class="col split">
+      <div class="panel">
+        <div class="tabs" id="tabs"></div>
+        <div id="editor"></div>
+      </div>
+      <div class="subpanel">
+        <div class="subcol">
+          <div class="toolbar"><strong>Preview</strong><span class="small hint">HTML/CSS/JS live preview</span><span class="right"><button id="btn-refresh" class="pill small">⟳ Refresh</button></span></div>
+          <iframe id="preview"></iframe>
+        </div>
+        <div class="subcol">
+          <div class="toolbar"><strong>Debug Log</strong><span class="right"><button id="btn-log-clear" class="pill small">Clear</button></span></div>
+          <div class="log" id="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <header><div class="brand"><span class="badge">Settings</span><div class="status small">Customize</div></div></header>
+    <div class="body">
+      <div class="grid2">
+        <div class="field"><label>Project Name</label><input id="set-project" placeholder="my-webcloud-app" /></div>
+        <div class="field"><label>Auto Save on Run</label><input id="set-autosave" type="checkbox" /></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Node.js (WebContainer) API URL</label><input id="set-wc" value="https://unpkg.com/@webcontainer/api/dist/index.js" /></div>
+        <div class="field"><label>Monaco CDN</label><input id="set-monaco" value="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js" /></div>
+      </div>
+      <div class="field">
+        <label>C Compiler (WASM) Loader URL (任意). 自動ロード失敗時はここに有効なプラグインの CDN URL を貼ってください.</label>
+        <input id="set-c" placeholder="https://example.com/c-compiler-plugin.js" />
+      </div>
+      <div class="field">
+        <label>Custom Command (name:js)</label>
+        <textarea id="set-usercmd" rows="3" placeholder="greet: (ctx)=>ctx.out('hello')"></textarea>
+      </div>
+      <div class="grid2">
+        <button id="btn-save-settings" class="pill">Save Settings</button>
+        <button id="btn-reset-all" class="pill danger">Factory Reset</button>
+      </div>
+      <div class="hint">Cプラグインは自動で複数候補URLを順番に試します。失敗した場合は上の欄にプラグインURLを貼ってください。</div>
+    </div>
+  </div>
+</div>
+
+<!-- 実装スクリプト -->
+<script>
+/* ---------------------------
+   IndexedDB helpers
+---------------------------- */
+const DB_NAME='webcloud-db', DB_VER=2;
+let idb;
+const openDB = ()=>new Promise((res,rej)=>{
+  const r=indexedDB.open(DB_NAME, DB_VER);
+  r.onupgradeneeded = e => {
+    const db = e.target.result;
+    if(!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+    if(!db.objectStoreNames.contains('files')) db.createObjectStore('files');
+    if(!db.objectStoreNames.contains('cmds')) db.createObjectStore('cmds');
+    if(!db.objectStoreNames.contains('settings')) db.createObjectStore('settings');
+  };
+  r.onsuccess = e => { idb = e.target.result; res(idb); };
+  r.onerror = e => rej(e);
+});
+const idbGet = (store,key)=>new Promise((res,rej)=>{ const tx=idb.transaction(store,'readonly').objectStore(store).get(key); tx.onsuccess=e=>res(e.target.result); tx.onerror=rej; });
+const idbSet = (store,key,val)=>new Promise((res,rej)=>{ const tx=idb.transaction(store,'readwrite').objectStore(store).put(val, key); tx.onsuccess=()=>res(); tx.onerror=rej; });
+const idbDel = (store,key)=>new Promise((res,rej)=>{ const tx=idb.transaction(store,'readwrite').objectStore(store).delete(key); tx.onsuccess=()=>res(); tx.onerror=rej; });
+const idbAll = (store)=>new Promise((res,rej)=>{ const st = idb.transaction(store,'readonly').objectStore(store); const rk=st.getAllKeys(), rv=st.getAll(); let keys; rk.onsuccess=e=>keys=e.target.result; rv.onsuccess=e=>res({keys, vals: e.target.result}); rk.onerror=rv.onerror=rej; });
+
+/* ---------------------------
+   UI helpers
+---------------------------- */
+const term = document.getElementById('terminal'), input = document.getElementById('input'), btnEnter = document.getElementById('btn-enter');
+const btnRun = document.getElementById('btn-run'), btnPreview = document.getElementById('btn-preview'), btnSave = document.getElementById('btn-save');
+const btnRefresh = document.getElementById('btn-refresh'), btnLogClear = document.getElementById('btn-log-clear'), logEl = document.getElementById('log');
+const tabsEl = document.getElementById('tabs'), statusNode = document.getElementById('status-node'), statusC = document.getElementById('status-c');
+const modal = document.getElementById('modal'), btnSettings = document.getElementById('btn-settings');
+
+function out(text, cls=''){ const d=document.createElement('div'); d.className='term-line'; d.innerHTML = cls? `<span class="${cls}">${text}</span>`:text; term.appendChild(d); term.scrollTop = term.scrollHeight; }
+function promptLine(t){ out(`<span class="prompt">$</span> ${t}`); }
+function logLine(text, cls=''){ const d=document.createElement('div'); if(cls) d.className=cls; d.textContent = text; logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight; }
+function setStatusNode(t,cls='ok'){ statusNode.innerHTML = `Node: <span class="${cls}">${t}</span>`; }
+function setStatusC(t,cls='ok'){ statusC.innerHTML = `C: <span class="${cls}">${t}</span>`; }
+function showModal(show){ modal.style.display = show ? 'grid' : 'none'; }
+
+/* ---------------------------
+   Monaco Editor
+---------------------------- */
+let editor, currentFile;
+const DEFAULT_FILES = {
+  '/index.html': `<!doctype html>
+<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>WebCloud App</title><link rel="stylesheet" href="./style.css"></head><body><h1>Hello WebCloud 👋</h1><p id="msg">Edit and ▶ Run.</p><script src="./script.js"></script></body></html>`,
+  '/style.css': `body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:20px } h1{ color:#0ea5e9 }`,
+  '/script.js': `document.getElementById('msg').textContent = 'Time: ' + new Date().toLocaleString();`,
+  '/app.js': `import fs from 'fs'; console.log('Node running in WebContainer'); fs.writeFileSync('hello.txt','hello from webcontainer');`,
+  '/main.c': `#include <stdio.h>\nint main(){ printf("Hello from C!\\n"); return 0; }`
+};
+
+function setupMonaco(){
+  require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+  require(['vs/editor/editor.main'], async function(){
+    editor = monaco.editor.create(document.getElementById('editor'), { value:'', language:'html', theme:'vs-dark', fontSize:14, minimap:{enabled:false}, automaticLayout:true });
+    await loadFilesToEditorTabs();
+  });
+}
+
+async function loadFilesToEditorTabs(){
+  const { keys } = await idbAll('files');
+  if(!keys || keys.length===0){ for(const [k,v] of Object.entries(DEFAULT_FILES)) await idbSet('files',k,v); }
+  const all = await idbAll('files');
+  tabsEl.innerHTML = '';
+  all.keys.forEach((path,i)=>{ const tab=document.createElement('div'); tab.className='tab'+(i===0?' active':''); tab.textContent=path.replace(/^\//,''); tab.onclick=()=>openFile(path); tabsEl.appendChild(tab); });
+  openFile(all.keys[0]);
+}
+
+async function openFile(path){
+  currentFile = path;
+  [...tabsEl.children].forEach(t=>t.classList.remove('active'));
+  const idx = [...tabsEl.children].findIndex(t=>t.textContent===path.replace(/^\//,''));
+  if(idx>=0) tabsEl.children[idx].classList.add('active');
+  const content = await idbGet('files', path);
+  const lang = path.endsWith('.js') ? 'javascript' : path.endsWith('.css') ? 'css' : path.endsWith('.c') ? 'c' : 'html';
+  editor.setValue(content || ''); monaco.editor.setModelLanguage(editor.getModel(), lang);
+}
+
+async function saveCurrent(){ if(!currentFile) return; await idbSet('files', currentFile, editor.getValue()); }
+
+/* ---------------------------
+   Preview
+---------------------------- */
+function refreshPreview(){
+  const iframe = document.getElementById('preview');
+  (async ()=>{
+    const html = await idbGet('files','/index.html') || '';
+    const css  = await idbGet('files','/style.css') || '';
+    const js   = await idbGet('files','/script.js') || '';
+    const doc = `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><style>${css}</style></head><body>${html.replace(/<\\/?(html|head|body)>/g,'')}<script>try{${js}}catch(e){console.error(e)}</script></body></html>`;
+    iframe.srcdoc = doc;
+  })();
+}
+
+/* ---------------------------
+   WebContainer (Node) boot
+---------------------------- */
+let webcontainer, wcApiUrl = 'https://unpkg.com/@webcontainer/api/dist/index.js';
+async function bootWebContainer(){
+  try{
+    const mod = await import(/* @vite-ignore */ wcApiUrl);
+    const { WebContainer } = mod;
+    webcontainer = await WebContainer.boot();
+    setStatusNode('ready','ok'); await mountToWebContainer();
+  }catch(e){
+    setStatusNode('failed','err'); out('Node/WebContainer boot failed. Check Settings.','err'); console.error(e);
+  }
+}
+async function mountToWebContainer(){
+  if(!webcontainer) return;
+  const { keys, vals } = await idbAll('files');
+  const tree = {};
+  for(let i=0;i<keys.length;i++) setNested(tree, keys[i], vals[i]);
+  await webcontainer.mount(tree);
+}
+function setNested(root, path, content){
+  const parts = path.split('/').filter(Boolean); let node = root;
+  for(let i=0;i<parts.length-1;i++){ const p=parts[i]; node[p]=node[p]||{}; node=node[p]; }
+  node[parts.at(-1)] = { file: { contents: content } };
+}
+async function wcSpawn(cmd,args,onData){
+  const proc = await webcontainer.spawn(cmd,args);
+  proc.output.pipeTo(new WritableStream({ write(d){ onData && onData(d); } }));
+  const exitCode = await proc.exit; return exitCode;
+}
+
+/* ---------------------------
+   C plugin auto-loader (CDN)
+   - 試行順に候補URLをロード
+   - 成功時に window.compileC が提供されることを期待
+---------------------------- */
+let cReady = false;
+const AUTO_CANDIDATES = [
+  // 試行候補 — 実験的プロジェクトの公開ページなどをここに置く（成功は配布側次第）
+  // 例（参考）： l u p y u e n が公開している tcc-wasm の GitHub Pages（実行ファイルの構成に依存します）
+  'https://lupyuen.github.io/tcc-riscv32-wasm/tcc-wasm-wrapper.js',
+  // よく使われるCDNのパターン（プラグイン提供者が公開していれば成功する）
+  'https://cdn.jsdelivr.net/gh/lupyuen/tcc-riscv32-wasm@gh-pages/tcc-wasm-wrapper.js',
+  // プレースホルダ（ユーザーがここに有効な plugin.js を貼れば動く）
+  // 'https://example.com/your-c-plugin.js'
+];
+
+async function tryLoadScript(url, isModule=true){
+  return new Promise((resolve,reject)=>{
+    try{
+      const s = document.createElement('script');
+      s.src = url;
+      if(isModule) s.type = 'module';
+      s.async = true;
+      s.onload = ()=>resolve(true);
+      s.onerror = ()=>reject(new Error('load error: '+url));
+      document.head.appendChild(s);
+    }catch(e){ reject(e); }
+  });
+}
+
+async function loadCPluginAuto(){
+  // 1) 既に存在すれば即 ready
+  if(typeof window.compileC === 'function'){ cReady = true; setStatusC('ready','ok'); return true; }
+  // 2) Settings上の手動URLがあれば最優先
+  const manual = await idbGet('settings','c-url');
+  if(manual){
+    try{
+      await import(/* @vite-ignore */ manual);
+      if(typeof window.compileC === 'function'){ cReady = true; setStatusC('ready','ok'); out('C plugin loaded from Settings.','ok'); return true; }
+    }catch(e){ console.warn('manual C plugin load failed', e); }
+  }
+  // 3) 候補を順に試行 (module import か非 module scriptとして)
+  for(const u of AUTO_CANDIDATES){
+    if(!u) continue;
+    try{
+      // Try import first (as module)
+      try { await import(/* @vite-ignore */ u); }
+      catch(e){ // fallback: inject as non-module
+        await tryLoadScript(u,false);
+      }
+      if(typeof window.compileC === 'function'){ cReady = true; setStatusC('ready','ok'); out('C plugin auto-loaded: '+u,'ok'); return true; }
+    }catch(e){ console.warn('auto C candidate failed', u, e); }
+  }
+  // 4) all failed
+  cReady = false; setStatusC('not found','warn');
+  out('Cコンパイラ自動ロードに失敗しました。SettingsでプラグインURLを指定してください。','warn');
+  out('期待API: window.compileC(source) => Promise<string | { stdout, stderr, exitCode }>', 'hint');
+  return false;
+}
+
+/* ---------------------------
+   Settings
+---------------------------- */
+const SKEYS = { project:'project-name', c:'c-url', wc:'wc-url', monaco:'monaco-cdn', autosave:'autosave' };
+async function loadSettings(){
+  const proj = (await idbGet('settings',SKEYS.project)) || 'my-webcloud-app';
+  const c = (await idbGet('settings',SKEYS.c)) || '';
+  const wc = (await idbGet('settings',SKEYS.wc)) || wcApiUrl;
+  const mon = (await idbGet('settings',SKEYS.monaco)) || 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js';
+  const autosave = (await idbGet('settings',SKEYS.autosave)) || false;
+  document.getElementById('set-project').value = proj;
+  document.getElementById('set-c').value = c;
+  document.getElementById('set-wc').value = wc;
+  document.getElementById('set-monaco').value = mon;
+  document.getElementById('set-autosave').checked = !!autosave;
+  wcApiUrl = wc;
+}
+async function saveSettings(){
+  await idbSet('settings',SKEYS.project, document.getElementById('set-project').value.trim());
+  await idbSet('settings',SKEYS.c, document.getElementById('set-c').value.trim());
+  await idbSet('settings',SKEYS.wc, document.getElementById('set-wc').value.trim());
+  await idbSet('settings',SKEYS.monaco, document.getElementById('set-monaco').value.trim());
+  await idbSet('settings',SKEYS.autosave, document.getElementById('set-autosave').checked);
+  showModal(false); out('Settings saved.','ok');
+  // reflect change: reload C plugin if URL updated
+  setStatusC('loading…','warn'); window.compileC = undefined; cReady=false; loadCPluginAuto();
+}
+async function factoryReset(){ const req=indexedDB.deleteDatabase(DB_NAME); req.onsuccess=()=>location.reload(); req.onerror=()=>alert('Reset failed'); }
+
