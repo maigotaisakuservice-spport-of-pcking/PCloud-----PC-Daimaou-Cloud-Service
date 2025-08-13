@@ -126,7 +126,6 @@ button:hover{background:#223349}.pill{border-radius:999px}
 
 <!-- 実装スクリプト -->
 <script>
-  window.addEventListener('DOMContentLoaded', () => {
 /* ---------------------------
    IndexedDB helpers
 ---------------------------- */
@@ -448,7 +447,8 @@ document.getElementById('btn-reset-all').onclick = ()=>{ if(confirm('Factory res
   // Try to auto-load C plugin
   await loadCPluginAuto();
 })();
-});
 </script>
+<!-- Monaco Editor loader -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
 </body>
 </html>
