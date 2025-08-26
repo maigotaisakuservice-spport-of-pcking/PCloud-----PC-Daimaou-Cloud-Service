@@ -1758,7 +1758,7 @@ function populateModelSelectors() {
     });
 }
 
-function syncAndLoadModel(event) {
+async function syncAndLoadModel(event) {
     const selectedModelId = event.target.value;
     const selectorPanel = document.getElementById('ai-model-selector-panel');
     const selectorSettings = document.getElementById('ai-model-selector-settings');
@@ -2087,6 +2087,7 @@ function loadPlugin(fileContent) {
 /* ---------------------------
    起動処理
 ---------------------------- */
+const userCmds = {};
 (async function boot(){
   try {
     await openDB();
