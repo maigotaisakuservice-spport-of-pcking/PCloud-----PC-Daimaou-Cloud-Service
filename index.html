@@ -775,7 +775,7 @@ const PROJECT_TEMPLATES = {
     name: 'Vanilla JS',
     files: {
       '/index.html': `<!doctype html>
-<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>WebCloud App</title><link rel="stylesheet" href="./style.css"></head><body><h1>Hello WebCloud 👋</h1><p id="msg">編集して ▶ 実行してください。</p><script src="./script.js"></script></body></html>`,
+<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>WebCloud App</title><link rel="stylesheet" href="./style.css"></head><body><h1>Hello WebCloud 👋</h1><p id="msg">編集して ▶ 実行してください。</p><script src="./script.js"><\/script></body></html>`,
       '/style.css': `body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:20px } h1{ color:#0ea5e9 }`,
       '/script.js': `document.getElementById('msg').textContent = '現在時刻: ' + new Date().toLocaleString();`,
       '/app.js': `import fs from 'fs'; console.log('WebContainerでNodeが実行中'); fs.writeFileSync('hello.txt','webcontainerよりこんにちは');`
@@ -830,7 +830,7 @@ server.listen(port, () => {
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module" src="/src/main.jsx"><\/script>
   </body>
 </html>`,
       '/package.json': `{
