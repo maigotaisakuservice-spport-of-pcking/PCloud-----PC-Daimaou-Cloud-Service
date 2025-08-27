@@ -172,9 +172,13 @@ button:hover{background:var(--btn-hover-bg)}.pill{border-radius:999px}
 </head>
 <body>
 <div id="loader" style="position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:9999;">
-  <div style="text-align:center;">
+  <div style="text-align:center;width:320px;">
     <div style="font-size:24px;font-weight:bold;">WebCloud IDE</div>
-    <div id="loader-status" style="margin-top:10px;color:var(--sub);">Initializing...</div>
+    <div id="loader-status" style="margin-top:10px;color:var(--sub);font-size:14px;min-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Initializing...</div>
+    <div style="width:100%;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:15px;height:10px;border:1px solid var(--border);">
+      <div id="progress-bar" style="width:0%;height:100%;background:var(--acc);transition:width 0.3s ease;"></div>
+    </div>
+    <div id="progress-percent" style="margin-top:5px;font-size:12px;color:var(--sub);">0%</div>
   </div>
 </div>
 <div class="layout" style="display: none;">
@@ -2105,58 +2109,58 @@ function loadPlugin(fileContent) {
 const userCmds = {};
 (async function boot(){
   const loaderStatus = document.getElementById('loader-status');
+  const progressBar = document.getElementById('progress-bar');
+  const progressPercent = document.getElementById('progress-percent');
+
+  const tasks = [
+    { name: 'Opening database...', func: openDB },
+    { name: 'Loading user settings...', func: async () => { await getOrSetUserId(); await loadSettings(); } },
+    { name: 'Connecting to GitHub...', func: async () => { const clientId = await idbGet('settings', SKEYS.githubClientId); await githubManager.init(clientId); } },
+    { name: 'Preparing editor...', func: setupMonaco },
+    { name: 'Initializing services...', func: () => { collaborationManager.init(); populateModelSelectors(); } },
+    { name: 'Building file tree...', func: renderFileTree },
+    { name: 'Initializing Git repository...', func: async () => { await initGit(); await renderGitGraph(); } },
+    { name: 'Starting Node.js environment...', func: bootWebContainer },
+    { name: 'Loading AI model...', func: async () => {
+        const lastModel = await idbGet('settings', SKEYS.aiModel);
+        if (lastModel) {
+            loaderStatus.textContent = `Loading AI model: ${lastModel.split('-')[0]}...`;
+            document.getElementById('ai-model-selector-panel').value = lastModel;
+            document.getElementById('ai-model-selector-settings').value = lastModel;
+            await aiManager.loadModel(lastModel);
+        }
+    }},
+    { name: 'Loading custom commands...', func: async () => {
+        const all = await idbAll('cmds');
+        if(all.keys) {
+          for(let i=0; i<all.keys.length; i++){
+            try { userCmds[all.keys[i]] = eval(all.vals[i]); } catch(e){}
+          }
+        }
+    }}
+  ];
+
   try {
-    loaderStatus.textContent = 'Opening database...';
-    await openDB();
-
-    loaderStatus.textContent = 'Loading user settings...';
-    await getOrSetUserId();
-    await loadSettings();
-
-    loaderStatus.textContent = 'Initializing GitHub connection...';
-    const clientId = await idbGet('settings', SKEYS.githubClientId);
-    await githubManager.init(clientId);
-
-    await setupMonaco();
-
-    collaborationManager.init();
-
-    loaderStatus.textContent = 'Populating UI components...';
-    populateModelSelectors();
-    await renderFileTree();
-
-    loaderStatus.textContent = 'Initializing Git repository...';
-    await initGit();
-    await renderGitGraph();
-
-    loaderStatus.textContent = 'Starting Node.js environment...';
-    await bootWebContainer();
-
-    const lastModel = await idbGet('settings', SKEYS.aiModel);
-    if (lastModel) {
-        loaderStatus.textContent = `Loading AI model (${lastModel})...`;
-        document.getElementById('ai-model-selector-panel').value = lastModel;
-        document.getElementById('ai-model-selector-settings').value = lastModel;
-        await aiManager.loadModel(lastModel);
+    const totalTasks = tasks.length;
+    for (let i = 0; i < totalTasks; i++) {
+      const task = tasks[i];
+      loaderStatus.textContent = task.name;
+      await task.func();
+      const percent = Math.round(((i + 1) / totalTasks) * 100);
+      progressBar.style.width = `${percent}%`;
+      progressPercent.textContent = `${percent}%`;
     }
 
-    const all = await idbAll('cmds');
-    if(all.keys) {
-      for(let i=0; i<all.keys.length; i++){
-        try {
-          userCmds[all.keys[i]] = eval(all.vals[i]);
-        } catch(e){}
-      }
-    }
-
-    // All systems go, hide loader and show app
     loaderStatus.textContent = 'Ready.';
-    document.getElementById('loader').style.display = 'none';
-    document.querySelector('.layout').style.display = 'grid';
+    setTimeout(() => {
+        document.getElementById('loader').style.display = 'none';
+        document.querySelector('.layout').style.display = 'grid';
+    }, 300);
 
   } catch (e) {
-    loaderStatus.textContent = `FATAL BOT ERROR: ${e.message}. Please reset the application or clear browser data.`;
+    loaderStatus.textContent = `FATAL BOOT ERROR: ${e.message}`;
     loaderStatus.style.color = 'var(--err)';
+    progressBar.style.background = 'var(--err)';
     console.error("Fatal Boot Error:", e);
   }
 })();
