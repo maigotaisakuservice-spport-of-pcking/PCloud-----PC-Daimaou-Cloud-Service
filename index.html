@@ -375,6 +375,9 @@ const openDB = ()=>new Promise((res,rej)=>{
   };
   r.onsuccess = e => { idb = e.target.result; res(idb); };
   r.onerror = e => rej(e);
+  r.onblocked = () => {
+    rej(new Error('Database is blocked. Please close other tabs with this page open.'));
+  };
 });
 const idbGet = (store,key)=>new Promise((res,rej)=>{ const tx=idb.transaction(store,'readonly').objectStore(store).get(key); tx.onsuccess=e=>res(e.target.result); tx.onerror=rej; });
 const idbSet = (store,key,val)=>new Promise((res,rej)=>{ const tx=idb.transaction(store,'readwrite').objectStore(store).put(val, key); tx.onsuccess=()=>res(); tx.onerror=rej; });
